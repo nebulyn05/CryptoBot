@@ -14,7 +14,8 @@ app.secret_key = 'your_secret_key'
 API_ID = '29469765'
 API_HASH = '9592a56b2eb5ff6eb2e92ee0e6ef9f14'
 
-SESSION_DIR = 'sessions/'
+# SESSION_DIR = 'sessions/' #Temp for vercel to work
+SESSION_DIR = '/tmp/sessions/'
 os.makedirs(SESSION_DIR, exist_ok=True)
 
 ACHILLES_BOT_USERNAME = 'achilles_trojanbot'
