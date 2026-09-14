@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Dashboard | Monitor Control</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            border-radius: 2rem;
+            padding: 2.5rem;
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+            box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(120deg, #fff, #a5f3fc);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            margin-bottom: 1rem;
+        }
+
+        .greeting {
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 2.5rem;
+            font-size: 1rem;
+        }
+
+        .actions {
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 1rem 1.8rem;
+            border-radius: 1.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+        }
+
+        .action-btn i {
+            font-size: 1.2rem;
+        }
+
+        .action-btn:hover {
+            background: rgba(59, 130, 246, 0.8);
+            border-color: #3b82f6;
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        form {
+            display: inline-block;
+        }
+
+        hr {
+            margin: 2rem 0;
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .status {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 1rem;
+            padding: 0.8rem;
+            color: #cbd5e1;
+            font-size: 0.85rem;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%) translateY(100%);
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(8px);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 2rem;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            z-index: 1000;
+            transition: transform 0.3s ease;
+            pointer-events: none;
+            border-left: 4px solid #3b82f6;
+            font-weight: 500;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .toast i {
+            font-size: 1.1rem;
+        }
+
+        .toast.success {
+            border-left-color: #10b981;
+        }
+        .toast.error {
+            border-left-color: #ef4444;
+        }
+
+        @media (max-width: 500px) {
+            .card { padding: 1.8rem; }
+            h1 { font-size: 1.8rem; }
+            .actions { gap: 1rem; }
+            .action-btn { padding: 0.7rem 1.2rem; font-size: 0.9rem; }
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1><i class="fas fa-tachometer-alt"></i> Dashboard</h1>
+    <div class="greeting">
+        <i class="fas fa-user-check"></i> Welcome back! Control your monitoring session.
+    </div>
+
+    <div class="actions">
+        <!-- Fetch groups (GET) - normal link, returns HTML -->
+        <a href="{{ url_for('fetch_groups') }}" class="action-btn">
+            <i class="fas fa-users"></i> Fetch Groups
+        </a>
+
+        <!-- Start listening (POST) - handled via AJAX -->
+        <button id="listenBtn" class="action-btn">
+            <i class="fas fa-play-circle"></i> Start Listening
+        </button>
+    </div>
+
+    <hr>
+    <div class="status">
+        <i class="fas fa-info-circle"></i> Select groups first, then start listening to monitor messages in real time.
+    </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast" class="toast">
+    <i class="fas fa-info-circle"></i> <span id="toastMessage"></span>
+</div>
+
+<script>
+    const listenBtn = document.getElementById('listenBtn');
+    const toast = document.getElementById('toast');
+    const toastMessage = document.getElementById('toastMessage');
+
+    function showToast(message, type = 'info') {
+        toastMessage.textContent = message;
+        toast.className = `toast ${type}`;
+        toast.classList.add('show');
+        setTimeout(() => {
+            toast.classList.remove('show');
+        }, 3000);
+    }
+
+    listenBtn.addEventListener('click', async () => {
+        // Disable button to prevent double submission
+        listenBtn.disabled = true;
+        listenBtn.style.opacity = '0.6';
+        const originalText = listenBtn.innerHTML;
+        listenBtn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Starting...';
+
+        try {
+            const response = await fetch("{{ url_for('listen') }}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showToast(data.status || 'Listening started successfully!', 'success');
+            } else {
+                showToast(data.status || 'Failed to start listening.', 'error');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showToast('Network error. Please try again.', 'error');
+        } finally {
+            // Restore button
+            listenBtn.disabled = false;
+            listenBtn.style.opacity = '1';
+            listenBtn.innerHTML = originalText;
+        }
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Select Groups | Telegram Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+            min-height: 100vh;
+            padding: 2rem 1.5rem;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            border-radius: 2rem;
+            padding: 2rem;
+            box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            background: linear-gradient(120deg, #fff, #e0e7ff);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .sub {
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 1.8rem;
+            border-left: 3px solid #3b82f6;
+            padding-left: 1rem;
+        }
+        .groups-list {
+            max-height: 60vh;
+            overflow-y: auto;
+            margin: 1.5rem 0;
+            padding-right: 0.5rem;
+        }
+        .group-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 1rem;
+            margin-bottom: 0.75rem;
+            transition: all 0.2s;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .group-item:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: translateX(5px);
+        }
+        label {
+            display: flex;
+            align-items: center;
+            padding: 1rem 1.2rem;
+            cursor: pointer;
+            gap: 1rem;
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+        input[type="checkbox"] {
+            width: 1.3rem;
+            height: 1.3rem;
+            cursor: pointer;
+            accent-color: #3b82f6;
+            margin-right: 0.2rem;
+        }
+        .group-name {
+            flex: 1;
+            font-size: 1rem;
+        }
+        .group-id {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            background: rgba(0,0,0,0.3);
+            padding: 0.2rem 0.6rem;
+            border-radius: 2rem;
+        }
+        button {
+            background: linear-gradient(90deg, #3b82f6, #2563eb);
+            border: none;
+            padding: 0.9rem 1.5rem;
+            border-radius: 1rem;
+            font-weight: 600;
+            font-size: 1rem;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            width: 100%;
+            justify-content: center;
+        }
+        button:hover {
+            background: linear-gradient(90deg, #2563eb, #1d4ed8);
+            transform: scale(0.98);
+        }
+        .counter {
+            text-align: right;
+            font-size: 0.8rem;
+            color: #a0c4ff;
+            margin-top: 0.5rem;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3b82f6;
+            border-radius: 10px;
+        }
+        @media (max-width: 600px) {
+            .card { padding: 1.5rem; }
+            h1 { font-size: 1.5rem; }
+            .group-name { font-size: 0.9rem; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h1><i class="fab fa-telegram"></i> Select Channels / Groups</h1>
+        <div class="sub">Choose which conversations you want to monitor</div>
+
+        <form action="{{ url_for('fetch_groups') }}" method="post">
+            <div class="groups-list">
+                {% for group in groups_and_channels %}
+                    <div class="group-item">
+                        <label>
+                            <input type="checkbox" name="selected_groups" value="{{ group.id }}">
+                            <span class="group-name"><i class="fas fa-comment-dots"></i> {{ group.name }}</span>
+                            <span class="group-id">ID: {{ group.id }}</span>
+                        </label>
+                    </div>
+                {% endfor %}
+            </div>
+            <div class="counter">
+                <i class="fas fa-layer-group"></i> {{ groups_and_channels|length }} available
+            </div>
+            <button type="submit">
+                <i class="fas fa-save"></i> Save Selection
+            </button>
+        </form>
+    </div>
+</div>
+</body>
+</html>
