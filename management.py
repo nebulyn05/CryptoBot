@@ -19,7 +19,7 @@ class ManagementUser(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     phone = db.Column(db.String(64), unique=True, nullable=False, index=True)
     display_name = db.Column(db.String(160))
-    bot_username = db.Column(db.String(160), default="achilles_trojanbot", nullable=False)
+    bot_username = db.Column(db.String(160), default="", nullable=False)
     active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     last_seen = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
@@ -85,6 +85,16 @@ def init_management():
 
     with _management_app.app_context():
         db.create_all()
+        # Remove the legacy hard-coded destination from existing accounts. New
+        # forwarding is driven only by user-managed bot profiles.
+        db.session.execute(text(
+            "UPDATE management_bot_configs SET enabled = FALSE "
+            "WHERE bot_username = 'achilles_trojanbot'"
+        ))
+        db.session.execute(text(
+            "UPDATE management_users SET bot_username = '' "
+            "WHERE bot_username = 'achilles_trojanbot'"
+        ))
         # Lightweight forward-compatible schema version marker. Existing deployments
         # remain intact; future additive migrations can be keyed from this version.
         db.session.execute(text(
@@ -133,7 +143,7 @@ def save_telegram_session(phone, session_string):
 
 
 def available_bots():
-    raw = os.getenv("MANAGEMENT_AVAILABLE_BOTS", "achilles_trojanbot")
+    raw = os.getenv("MANAGEMENT_AVAILABLE_BOTS", "")
     return [item.strip().lstrip("@") for item in raw.split(",") if item.strip()]
 
 
@@ -141,7 +151,7 @@ def _user(phone, create=True, bot_username=None):
     with _management_app.app_context():
         user = ManagementUser.query.filter_by(phone=phone).first()
         if not user and create:
-            user = ManagementUser(phone=phone, bot_username=bot_username or "achilles_trojanbot")
+            user = ManagementUser(phone=phone, bot_username=bot_username or "")
             db.session.add(user)
             db.session.flush()
         if user:
@@ -149,16 +159,8 @@ def _user(phone, create=True, bot_username=None):
             if bot_username:
                 user.bot_username = bot_username
 
-            configured = ManagementBotConfig.query.filter_by(
-                user_id=user.id, bot_username=user.bot_username
-            ).first()
-            if not configured:
-                db.session.add(ManagementBotConfig(
-                    user_id=user.id,
-                    bot_username=user.bot_username,
-                    label=user.bot_username,
-                    enabled=True,
-                ))
+            if bot_username:
+                user.bot_username = bot_username
             db.session.commit()
         return user.id if user else None
 
@@ -232,6 +234,17 @@ def get_monitored_chat_ids(phone):
         return [int(g.chat_id) for g in ManagementGroup.query.filter_by(
             user_id=user.id, monitored=True
         ).all()]
+
+
+def get_users_with_telegram_sessions():
+    """Return phones with persisted Telegram sessions for startup restoration."""
+    with _management_app.app_context():
+        rows = (
+            db.session.query(ManagementUser.phone)
+            .join(TelegramSession, TelegramSession.user_id == ManagementUser.id)
+            .all()
+        )
+        return [row[0] for row in rows]
 
 
 def get_enabled_bots(phone):
@@ -390,7 +403,7 @@ def update_user_bot(phone, bot_id, label=None, enabled=None):
                 .order_by(ManagementBotConfig.created_at.asc())
                 .first()
             )
-            user.bot_username = fallback.bot_username if fallback else "achilles_trojanbot"
+            user.bot_username = fallback.bot_username if fallback else ""
 
         config.updated_at = utcnow()
         user.last_seen = utcnow()
@@ -428,7 +441,7 @@ def delete_user_bot(phone, bot_id):
                 .order_by(ManagementBotConfig.created_at.asc())
                 .first()
             )
-            user.bot_username = fallback.bot_username if fallback else "achilles_trojanbot"
+            user.bot_username = fallback.bot_username if fallback else ""
 
         user.last_seen = utcnow()
         db.session.commit()
