@@ -94,6 +94,17 @@ def _user(phone, create=True, bot_username=None):
             user.last_seen = utcnow()
             if bot_username:
                 user.bot_username = bot_username
+
+            configured = ManagementBotConfig.query.filter_by(
+                user_id=user.id, bot_username=user.bot_username
+            ).first()
+            if not configured:
+                db.session.add(ManagementBotConfig(
+                    user_id=user.id,
+                    bot_username=user.bot_username,
+                    label=user.bot_username,
+                    enabled=True,
+                ))
             db.session.commit()
         return user.id if user else None
 
