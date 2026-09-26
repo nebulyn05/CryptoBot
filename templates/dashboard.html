@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>CryptoBot | Control Center</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
@@ -84,8 +83,8 @@ function render(){
 }
 function toggleDetails(id){const e=document.getElementById('signal-'+id);if(e)e.classList.toggle('open')}
 async function refresh(){try{const r=await fetch('{{ url_for("management_me") }}');const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render()}catch(e){toast(e.message||'Refresh failed')}}
-async function removeGroup(id){try{const r=await fetch('{{ url_for("management_group_delete",chat_id="__ID__") }}'.replace('__ID__',decodeURIComponent(id)),{method:'DELETE',headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]').content}});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Group removed from watch list')}catch(e){toast(e.message||'Could not remove group')}}
-async function selectBot(id){const b=(state.bots||[]).find(x=>x.id===id);if(!b)return;try{const r=await fetch('{{ url_for("management_bot") }}',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=csrf-token]').content},body:JSON.stringify({bot_username:b.bot_username})});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Selected bot updated')}catch(e){toast(e.message||'Could not select bot')}}
+async function removeGroup(id){try{const r=await fetch('{{ url_for("management_group_delete",chat_id="__ID__") }}'.replace('__ID__',decodeURIComponent(id)),{method:'DELETE'});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Group removed from watch list')}catch(e){toast(e.message||'Could not remove group')}}
+async function selectBot(id){const b=(state.bots||[]).find(x=>x.id===id);if(!b)return;try{const r=await fetch('{{ url_for("management_bot") }}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bot_username:b.bot_username})});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Selected bot updated')}catch(e){toast(e.message||'Could not select bot')}}
 function openBotModal(id=null){editingBotId=id;document.getElementById('modalTitle').textContent=id?'Edit Bot':'Add Custom Bot';document.getElementById('botUsername').value='';document.getElementById('botLabel').value='';document.getElementById('botModal').classList.add('show')}
 function editBot(id,u,l){editingBotId=id;document.getElementById('modalTitle').textContent='Edit Bot';document.getElementById('botUsername').value=decodeURIComponent(u);document.getElementById('botUsername').disabled=true;document.getElementById('botLabel').value=decodeURIComponent(l);document.getElementById('botModal').classList.add('show')}
 function closeBotModal(){document.getElementById('botModal').classList.remove('show');document.getElementById('botUsername').disabled=false;editingBotId=null}
@@ -94,13 +93,13 @@ async function saveBotProfile(){
  if(!username){toast('Bot username is required');return}
  try{
   const url=editingBotId?'{{ url_for("management_bots_update",bot_id=0) }}'.replace('/0','/'+editingBotId):'{{ url_for("management_bots_add") }}';
-  const opts={method:editingBotId?'PATCH':'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=csrf-token]').content},body:JSON.stringify(editingBotId?{label}:{bot_username:username,label})};
+  const opts={method:editingBotId?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(editingBotId?{label}:{bot_username:username,label})};
   const r=await fetch(url,opts),d=await r.json();if(!r.ok)throw new Error(d.error);
   state=d;closeBotModal();render();toast(editingBotId?'Bot updated':'Bot added');
  }catch(e){toast(e.message||'Could not save bot')}
 }
 async function deleteBot(id){if(!confirm('Delete this bot profile?'))return;try{const r=await fetch('{{ url_for("management_bots_delete",bot_id=0) }}'.replace('/0','/'+id),{method:'DELETE',headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]').content}});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Bot profile deleted')}catch(e){toast(e.message||'Could not delete bot')}}
-async function saveProfile(){const v=document.getElementById('displayName').value.trim();try{const r=await fetch('{{ url_for("management_profile") }}',{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=csrf-token]').content},body:JSON.stringify({display_name:v})});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Profile saved')}catch(e){toast(e.message||'Could not save profile')}}
+async function saveProfile(){const v=document.getElementById('displayName').value.trim();try{const r=await fetch('{{ url_for("management_profile") }}',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({display_name:v})});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Profile saved')}catch(e){toast(e.message||'Could not save profile')}}
 render();
 setInterval(refresh,15000);
 </script>
