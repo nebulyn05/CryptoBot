@@ -189,7 +189,7 @@ async def listen_for_signals(client, phone_number):
         return
 
     selected_chats = config_data.get("selected_chats", [])
-    sync_user(phone_number, bot_username=ACHILLES_BOT_USERNAME)
+    sync_user(phone_number)
     if not selected_chats:
         print(f"❌ No chats selected for {phone_number}.")
         return
