@@ -284,24 +284,147 @@ def password():
 @app.route('/dashboard')
 def dashboard():
     phone = session.get('phone')
-    management = get_management_snapshot(phone) if phone else None
+    if not phone:
+        return redirect(url_for('index'))
+    sync_user(phone)
+    management = get_management_snapshot(phone)
     return render_template('dashboard.html', management=management)
+
+
+def _management_user():
+    return session.get('phone')
+
+
+@app.route('/api/management/me')
+def management_me():
+    phone = _management_user()
+    if not phone:
+        return jsonify({'error': 'not_authenticated'}), 401
+    sync_user(phone)
+    return jsonify(get_management_snapshot(phone) or {})
+
+
+@app.route('/api/management/groups', methods=['POST'])
+def management_groups():
+    phone = _management_user()
+    if not phone:
+        return jsonify({'error': 'not_authenticated'}), 401
+    payload = request.get_json(silent=True) or {}
+    chat_id = payload.get('chat_id')
+    if chat_id is None:
+        return jsonify({'error': 'chat_id is required'}), 400
+    try:
+        cid = int(chat_id)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'chat_id must be numeric'}), 400
+    monitored = bool(payload.get('monitored'))
+    if not set_group_monitoring(phone, str(cid), monitored):
+        return jsonify({'error': 'user not found'}), 404
+
+    config_file = get_config(phone)
+    try:
+        with open(config_file, 'r') as f:
+            config_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        config_data = {}
+    selected = {int(x) for x in config_data.get('selected_chats', [])}
+    if monitored:
+        selected.add(cid)
+    else:
+        selected.discard(cid)
+    config_data['selected_chats'] = sorted(selected)
+    with open(config_file, 'w') as f:
+        json.dump(config_data, f, indent=4)
+    return jsonify(get_management_snapshot(phone))
+
+
+@app.route('/api/management/groups/<path:chat_id>', methods=['DELETE'])
+def management_group_delete(chat_id):
+    phone = _management_user()
+    if not phone:
+        return jsonify({'error': 'not_authenticated'}), 401
+    if not remove_group(phone, chat_id):
+        return jsonify({'error': 'group not found'}), 404
+    config_file = get_config(phone)
+    try:
+        with open(config_file, 'r') as f:
+            config_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        config_data = {}
+    try:
+        selected = {int(x) for x in config_data.get('selected_chats', [])}
+        selected.discard(int(chat_id))
+        config_data['selected_chats'] = sorted(selected)
+        with open(config_file, 'w') as f:
+            json.dump(config_data, f, indent=4)
+    except ValueError:
+        pass
+    return jsonify(get_management_snapshot(phone))
+
+
+@app.route('/api/management/bot', methods=['POST'])
+def management_bot():
+    phone = _management_user()
+    if not phone:
+        return jsonify({'error': 'not_authenticated'}), 401
+    payload = request.get_json(silent=True) or {}
+    bot_username = (payload.get('bot_username') or '').strip().lstrip('@')
+    if bot_username not in available_bots():
+        return jsonify({'error': 'bot is not in the configured management bot list'}), 400
+    if not set_user_bot(phone, bot_username):
+        return jsonify({'error': 'could not save bot setting'}), 400
+    return jsonify(get_management_snapshot(phone))
+
+
+def _admin_authorized():
+    expected = os.getenv('MANAGEMENT_ADMIN_KEY', '')
+    if not expected:
+        return False
+    supplied = request.headers.get('X-Management-Admin-Key', '')
+    return supplied == expected or session.get('management_admin') is True
+
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        expected = os.getenv('MANAGEMENT_ADMIN_KEY', '')
+        if expected and request.form.get('key', '') == expected:
+            session['management_admin'] = True
+            return redirect(url_for('admin_dashboard'))
+        flash('Invalid admin key.')
+    return render_template('admin_login.html')
+
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('management_admin', None)
+    return redirect(url_for('admin_login'))
+
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not _admin_authorized():
+        return redirect(url_for('admin_login'))
+    return render_template('admin_dashboard.html', overview=get_management_overview())
 
 
 @app.route('/admin/management')
 def management_admin():
-    expected = os.getenv('MANAGEMENT_ADMIN_KEY', '')
-    supplied = request.headers.get('X-Management-Admin-Key', '') or request.args.get('key', '')
-    if not expected or supplied != expected:
+    if not _admin_authorized():
         return jsonify({'error': 'unauthorized'}), 401
     return jsonify(get_management_overview())
+
 
 @app.route('/fetch_groups', methods=['GET', 'POST'])
 def fetch_groups():
     phone = session.get('phone')
+    if not phone:
+        return redirect(url_for('index'))
     client = get_client(phone)
 
-    groups = run_async(fetch_groups_async(client))  # ✅ FIXED
+    groups = run_async(fetch_groups_async(client))
+    sync_user(phone)
+    sync_available_groups(phone, groups)
 
     if request.method == 'POST':
         selected_ids = request.form.getlist('selected_groups')
@@ -309,10 +432,12 @@ def fetch_groups():
         config_data = {"selected_chats": [int(id) for id in selected_ids]}
         with open(config_file, "w") as f:
             json.dump(config_data, f, indent=4)
-        flash("✅ Selected groups/channels saved!")
+        sync_groups(phone, selected_ids)
+        flash("Selected groups/channels saved!")
         return redirect(url_for('dashboard'))
 
     return render_template('fetch_groups.html', groups_and_channels=groups)
+
 
 @app.route('/listen', methods=['POST'])
 def listen():
