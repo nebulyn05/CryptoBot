@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timezone
 
 from flask import Flask
@@ -93,6 +94,17 @@ def _user(phone, create=True, bot_username=None):
             user.last_seen = utcnow()
             if bot_username:
                 user.bot_username = bot_username
+
+            configured = ManagementBotConfig.query.filter_by(
+                user_id=user.id, bot_username=user.bot_username
+            ).first()
+            if not configured:
+                db.session.add(ManagementBotConfig(
+                    user_id=user.id,
+                    bot_username=user.bot_username,
+                    label=user.bot_username,
+                    enabled=True,
+                ))
             db.session.commit()
         return user.id if user else None
 
@@ -194,9 +206,21 @@ def remove_group(phone, chat_id):
         return True
 
 
+def _normalize_bot_username(bot_username):
+    return (bot_username or "").strip().lstrip("@").strip()
+
+
+def _valid_bot_username(bot_username):
+    return bool(
+        bot_username
+        and 3 <= len(bot_username) <= 160
+        and re.fullmatch(r"[A-Za-z0-9_]+", bot_username)
+    )
+
+
 def set_user_bot(phone, bot_username):
-    bot_username = (bot_username or "").strip().lstrip("@")
-    if not bot_username or bot_username not in available_bots():
+    bot_username = _normalize_bot_username(bot_username)
+    if not _valid_bot_username(bot_username):
         return False
 
     with _management_app.app_context():
@@ -212,10 +236,8 @@ def set_user_bot(phone, bot_username):
         ).first()
         if not config:
             config = ManagementBotConfig(
-                user_id=user.id,
-                bot_username=bot_username,
-                label=bot_username,
-                enabled=True,
+                user_id=user.id, bot_username=bot_username,
+                label=bot_username, enabled=True,
             )
             db.session.add(config)
         else:
@@ -225,6 +247,115 @@ def set_user_bot(phone, bot_username):
         user.last_seen = utcnow()
         db.session.commit()
         return True
+
+
+def add_user_bot(phone, bot_username, label=None):
+    bot_username = _normalize_bot_username(bot_username)
+    label = (label or bot_username).strip()[:160]
+    if not _valid_bot_username(bot_username):
+        return False, "invalid_bot_username"
+
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            user = ManagementUser(phone=phone, bot_username=bot_username)
+            db.session.add(user)
+            db.session.flush()
+
+        config = ManagementBotConfig.query.filter_by(
+            user_id=user.id, bot_username=bot_username
+        ).first()
+        if config:
+            return False, "bot_already_exists"
+
+        db.session.add(ManagementBotConfig(
+            user_id=user.id, bot_username=bot_username,
+            label=label, enabled=True
+        ))
+        user.last_seen = utcnow()
+        db.session.commit()
+        return True, None
+
+
+def update_user_bot(phone, bot_id, label=None, enabled=None):
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return False, "user_not_found"
+        try:
+            bot_id = int(bot_id)
+        except (TypeError, ValueError):
+            return False, "bot_not_found"
+
+        config = ManagementBotConfig.query.filter_by(
+            id=bot_id, user_id=user.id
+        ).first()
+        if not config:
+            return False, "bot_not_found"
+
+        if label is not None:
+            label = str(label).strip()[:160]
+            if not label:
+                return False, "label_required"
+            config.label = label
+
+        if enabled is not None:
+            config.enabled = bool(enabled)
+
+        if config.bot_username == user.bot_username and not config.enabled:
+            fallback = (
+                ManagementBotConfig.query
+                .filter(
+                    ManagementBotConfig.user_id == user.id,
+                    ManagementBotConfig.id != config.id,
+                    ManagementBotConfig.enabled.is_(True),
+                )
+                .order_by(ManagementBotConfig.created_at.asc())
+                .first()
+            )
+            user.bot_username = fallback.bot_username if fallback else "achilles_trojanbot"
+
+        config.updated_at = utcnow()
+        user.last_seen = utcnow()
+        db.session.commit()
+        return True, None
+
+
+def delete_user_bot(phone, bot_id):
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return False, "user_not_found"
+        try:
+            bot_id = int(bot_id)
+        except (TypeError, ValueError):
+            return False, "bot_not_found"
+
+        config = ManagementBotConfig.query.filter_by(
+            id=bot_id, user_id=user.id
+        ).first()
+        if not config:
+            return False, "bot_not_found"
+
+        was_selected = config.bot_username == user.bot_username
+        db.session.delete(config)
+
+        if was_selected:
+            fallback = (
+                ManagementBotConfig.query
+                .filter(
+                    ManagementBotConfig.user_id == user.id,
+                    ManagementBotConfig.id != config.id,
+                    ManagementBotConfig.enabled.is_(True),
+                )
+                .order_by(ManagementBotConfig.created_at.asc())
+                .first()
+            )
+            user.bot_username = fallback.bot_username if fallback else "achilles_trojanbot"
+
+        user.last_seen = utcnow()
+        db.session.commit()
+        return True, None
 
 
 def record_signal(phone, signal, source_chat_id=None, source_chat_name=None, raw_message=None):
@@ -350,6 +481,17 @@ def get_management_overview():
                         .order_by(ManagementSignal.captured_at.desc())
                         .limit(100).all()
                     ),
+                    "bots": [
+                        {
+                            "id": b.id,
+                            "bot_username": b.bot_username,
+                            "label": b.label or b.bot_username,
+                            "enabled": b.enabled,
+                            "selected": b.bot_username == u.bot_username,
+                        }
+                        for b in ManagementBotConfig.query.filter_by(user_id=u.id)
+                        .order_by(ManagementBotConfig.label.asc()).all()
+                    ],
                 }
                 for u in users
             ],
