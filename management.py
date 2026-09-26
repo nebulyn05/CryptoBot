@@ -25,6 +25,7 @@ class ManagementUser(db.Model):
     last_seen = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     groups = db.relationship("ManagementGroup", backref="user", cascade="all, delete-orphan")
     signals = db.relationship("ManagementSignal", backref="user", cascade="all, delete-orphan")
+    bots = db.relationship("ManagementBotConfig", backref="user", cascade="all, delete-orphan")
 
 
 class ManagementGroup(db.Model):
@@ -633,11 +634,13 @@ def get_management_analytics(phone=None):
             if not user:
                 return {"signals": 0, "unique_tokens": 0, "top_tokens": []}
             query = query.filter_by(user_id=user.id)
+        total = query.count()
+        unique = query.with_entities(db.func.count(db.func.distinct(ManagementSignal.token))).scalar() or 0
         rows = query.with_entities(ManagementSignal.token, db.func.count(ManagementSignal.id)).group_by(
             ManagementSignal.token
         ).order_by(db.func.count(ManagementSignal.id).desc()).limit(20).all()
         return {
-            "signals": query.count(),
-            "unique_tokens": len(rows),
+            "signals": total,
+            "unique_tokens": unique,
             "top_tokens": [{"token": token, "count": count} for token, count in rows],
         }
