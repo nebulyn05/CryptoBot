@@ -530,7 +530,19 @@ def fetch_groups():
         return redirect(url_for('index'))
     client = get_client(phone)
 
-    groups = run_async(fetch_groups_async(client))
+    try:
+        groups = run_async(fetch_groups_async(client))
+    except PermissionError:
+        # The Flask session may still exist even when Telethon's Telegram
+        # authorization has expired or its session file was lost.
+        session.pop('phone_code_hash', None)
+        flash("Your Telegram session has expired or is no longer available. Please sign in to Telegram again.")
+        return redirect(url_for('index'))
+    except Exception:
+        app.logger.exception("Failed to fetch Telegram groups for %s", phone)
+        flash("Telegram could not be reached while loading your groups. Please try again.")
+        return redirect(url_for('dashboard'))
+
     sync_user(phone)
     sync_available_groups(phone, groups)
 
