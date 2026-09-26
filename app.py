@@ -7,7 +7,7 @@ from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
 from telethon.sessions import StringSession
 import threading
-from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics, get_telegram_session, save_telegram_session, get_monitored_chat_ids, get_enabled_bots, get_users_with_telegram_sessions)
+from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics, get_telegram_session, save_telegram_session, get_monitored_chat_ids, get_enabled_bots, get_selected_bot, get_users_with_telegram_sessions)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')
@@ -172,16 +172,21 @@ async def fetch_groups_async(client):
 # Trading
 # -----------------------------
 async def trade(client, signal, phone_number):
-    """Forward a parsed signal to every enabled bot configured for this user."""
+    """Forward a parsed signal to the user's selected bot, with enabled bots as fallback."""
     try:
         await client.connect()
         if not await client.is_user_authorized():
-            print(f"{phone_number}: Telegram client is not authorized")
+            app.logger.error("Forwarding skipped for %s: Telegram client is not authorized", phone_number)
             return
 
-        bots = get_enabled_bots(phone_number)
+        selected_bot = get_selected_bot(phone_number)
+        bots = [selected_bot] if selected_bot else get_enabled_bots(phone_number)
+
         if not bots:
-            print(f"{phone_number}: no enabled bot profiles; signal recorded but not forwarded")
+            app.logger.error(
+                "Forwarding skipped for %s: no selected or enabled bot profile is configured",
+                phone_number,
+            )
             return
 
         token = signal.get("token", "UNKNOWN")
@@ -191,14 +196,40 @@ async def trade(client, signal, phone_number):
         else:
             msg = f"Buy {ca}"
 
+        app.logger.info(
+            "Forwarding signal for %s to configured bot(s): %s",
+            phone_number,
+            ", ".join(f"@{b}" for b in bots),
+        )
+
         for bot_username in bots:
+            bot_username = (bot_username or "").strip().lstrip("@")
+            if not bot_username:
+                continue
             try:
-                await client.send_message(bot_username, "/start")
+                entity = await client.get_entity(bot_username)
+                app.logger.info(
+                    "Resolved forwarding target @%s for %s as Telegram entity %s",
+                    bot_username,
+                    phone_number,
+                    getattr(entity, "id", "unknown"),
+                )
+                await client.send_message(entity, "/start")
                 await asyncio.sleep(2)
-                await client.send_message(bot_username, msg)
-                print(f"{phone_number}: signal forwarded to @{bot_username}: {msg}")
-            except Exception:
-                app.logger.exception("Failed to forward signal to @%s for %s", bot_username, phone_number)
+                await client.send_message(entity, msg)
+                app.logger.info(
+                    "Signal forwarded successfully for %s to @%s: %s",
+                    phone_number,
+                    bot_username,
+                    msg,
+                )
+            except Exception as exc:
+                app.logger.exception(
+                    "Failed to forward signal to @%s for %s: %s",
+                    bot_username,
+                    phone_number,
+                    exc,
+                )
 
     except Exception:
         app.logger.exception("Trade/forwarding error for %s", phone_number)
