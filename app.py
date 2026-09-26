@@ -7,7 +7,7 @@ from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
 from telethon.sessions import StringSession
 import threading
-from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics, get_telegram_session, save_telegram_session, get_monitored_chat_ids, get_enabled_bots)
+from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics, get_telegram_session, save_telegram_session, get_monitored_chat_ids, get_enabled_bots, get_users_with_telegram_sessions)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')
@@ -23,8 +23,6 @@ API_HASH = '9592a56b2eb5ff6eb2e92ee0e6ef9f14'
 SESSION_DIR = os.getenv('SESSION_DIR', '/tmp/sessions')
 os.makedirs(SESSION_DIR, exist_ok=True)
 
-ACHILLES_BOT_USERNAME = 'achilles_trojanbot'
-
 # Multi-user storage
 clients = {}
 listeners = {}
@@ -35,6 +33,13 @@ threading.Thread(target=loop.run_forever, daemon=True).start()
 
 # Persistent management database. This records users, monitored groups and captured signals.
 init_management()
+
+
+# Restore monitoring after a Render restart using persisted Telegram sessions.
+# The actual listener setup is scheduled after the helper functions are defined.
+def _restore_monitors_after_startup():
+    for phone in get_users_with_telegram_sessions():
+        start_listener(phone)
 
 
 # -----------------------------
@@ -621,6 +626,12 @@ def listen():
     threading.Thread(target=start_listener, args=(phone_number,), daemon=True).start()
 
     return jsonify({"status": f"Listening for signals for {phone_number}..."})
+
+# Restore any persisted monitors once all functions are defined.
+try:
+    _restore_monitors_after_startup()
+except Exception:
+    app.logger.exception("Failed to restore Telegram monitors at startup")
 
 # -----------------------------
 # Run
