@@ -66,6 +66,8 @@ def init_management():
     database_url = os.getenv("DATABASE_URL", "sqlite:////tmp/cryptobot_management.db")
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
     _management_app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     _management_app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
