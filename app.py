@@ -6,7 +6,7 @@ import asyncio
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
 import threading
-from management import init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview
+from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, available_bots)
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
