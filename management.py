@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, text
 
 db = SQLAlchemy()
 _management_app = Flask("cryptobot-management-db")
@@ -76,6 +76,20 @@ def init_management():
 
     with _management_app.app_context():
         db.create_all()
+        # Lightweight forward-compatible schema version marker. Existing deployments
+        # remain intact; future additive migrations can be keyed from this version.
+        db.session.execute(text(
+            "CREATE TABLE IF NOT EXISTS management_schema_meta "
+            "(id INTEGER PRIMARY KEY, version INTEGER NOT NULL)"
+        ))
+        row = db.session.execute(text(
+            "SELECT version FROM management_schema_meta WHERE id = 1"
+        )).first()
+        if not row:
+            db.session.execute(text(
+                "INSERT INTO management_schema_meta (id, version) VALUES (1, 1)"
+            ))
+        db.session.commit()
 
 
 def available_bots():
