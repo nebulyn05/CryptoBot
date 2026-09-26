@@ -496,3 +496,134 @@ def get_management_overview():
                 for u in users
             ],
         }
+
+
+def set_user_active(user_id, active):
+    with _management_app.app_context():
+        user = db.session.get(ManagementUser, int(user_id))
+        if not user:
+            return False
+        user.active = bool(active)
+        user.last_seen = utcnow()
+        db.session.commit()
+        return True
+
+
+def delete_user(user_id):
+    with _management_app.app_context():
+        user = db.session.get(ManagementUser, int(user_id))
+        if not user:
+            return False
+        db.session.delete(user)
+        db.session.commit()
+        return True
+
+
+def admin_set_group_monitoring(group_id, monitored):
+    with _management_app.app_context():
+        group = db.session.get(ManagementGroup, int(group_id))
+        if not group:
+            return False
+        group.monitored = bool(monitored)
+        group.updated_at = utcnow()
+        db.session.commit()
+        return True
+
+
+def admin_delete_group(group_id):
+    with _management_app.app_context():
+        group = db.session.get(ManagementGroup, int(group_id))
+        if not group:
+            return False
+        db.session.delete(group)
+        db.session.commit()
+        return True
+
+
+def admin_update_bot(bot_id, label=None, enabled=None):
+    with _management_app.app_context():
+        config = db.session.get(ManagementBotConfig, int(bot_id))
+        if not config:
+            return False
+        user = db.session.get(ManagementUser, config.user_id)
+        if label is not None:
+            label = str(label).strip()[:160]
+            if not label:
+                return False
+            config.label = label
+        if enabled is not None:
+            config.enabled = bool(enabled)
+            if not config.enabled and user and user.bot_username == config.bot_username:
+                fallback = (ManagementBotConfig.query
+                    .filter(ManagementBotConfig.user_id == user.id,
+                            ManagementBotConfig.id != config.id,
+                            ManagementBotConfig.enabled.is_(True))
+                    .order_by(ManagementBotConfig.created_at.asc()).first())
+                user.bot_username = fallback.bot_username if fallback else "achilles_trojanbot"
+        config.updated_at = utcnow()
+        db.session.commit()
+        return True
+
+
+def admin_delete_bot(bot_id):
+    with _management_app.app_context():
+        config = db.session.get(ManagementBotConfig, int(bot_id))
+        if not config:
+            return False
+        user = db.session.get(ManagementUser, config.user_id)
+        was_selected = user and user.bot_username == config.bot_username
+        db.session.delete(config)
+        if was_selected:
+            fallback = (ManagementBotConfig.query
+                .filter(ManagementBotConfig.user_id == user.id,
+                        ManagementBotConfig.id != config.id,
+                        ManagementBotConfig.enabled.is_(True))
+                .order_by(ManagementBotConfig.created_at.asc()).first())
+            user.bot_username = fallback.bot_username if fallback else "achilles_trojanbot"
+        db.session.commit()
+        return True
+
+
+def set_display_name(phone, display_name):
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return False
+        value = (display_name or "").strip()[:160]
+        user.display_name = value or None
+        user.last_seen = utcnow()
+        db.session.commit()
+        return True
+
+
+def get_signal_page(phone, limit=50, offset=0, token=None):
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return {"items": [], "total": 0, "limit": limit, "offset": offset}
+        limit = max(1, min(int(limit), 100))
+        offset = max(0, int(offset))
+        query = ManagementSignal.query.filter_by(user_id=user.id)
+        if token:
+            query = query.filter(ManagementSignal.token.ilike(f"%{str(token)[:80]}%"))
+        total = query.count()
+        items = query.order_by(ManagementSignal.captured_at.desc()).offset(offset).limit(limit).all()
+        return {"items": _signal_payload(items), "total": total, "limit": limit, "offset": offset}
+
+
+def get_management_analytics(phone=None):
+    with _management_app.app_context():
+        query = ManagementSignal.query
+        if phone:
+            user = ManagementUser.query.filter_by(phone=phone).first()
+            if not user:
+                return {"signals": 0, "unique_tokens": 0, "top_tokens": []}
+            query = query.filter_by(user_id=user.id)
+        rows = query.with_entities(ManagementSignal.token, db.func.count(ManagementSignal.id)).group_by(
+            ManagementSignal.token
+        ).order_by(db.func.count(ManagementSignal.id).desc()).limit(20).all()
+        return {
+            "signals": query.count(),
+            "unique_tokens": len(rows),
+            "top_tokens": [{"token": token, "count": count} for token, count in rows],
+        }
