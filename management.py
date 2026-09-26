@@ -80,11 +80,11 @@ def available_bots():
     return [item.strip().lstrip("@") for item in raw.split(",") if item.strip()]
 
 
-def _user(phone, create=True, bot_username="achilles_trojanbot"):
+def _user(phone, create=True, bot_username=None):
     with _management_app.app_context():
         user = ManagementUser.query.filter_by(phone=phone).first()
         if not user and create:
-            user = ManagementUser(phone=phone, bot_username=bot_username)
+            user = ManagementUser(phone=phone, bot_username=bot_username or "achilles_trojanbot")
             db.session.add(user)
             db.session.flush()
         if user:
@@ -95,7 +95,7 @@ def _user(phone, create=True, bot_username="achilles_trojanbot"):
         return user.id if user else None
 
 
-def sync_user(phone, bot_username="achilles_trojanbot"):
+def sync_user(phone, bot_username=None):
     return _user(phone, True, bot_username)
 
 
