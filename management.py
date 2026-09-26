@@ -223,6 +223,29 @@ def sync_available_groups(phone, groups):
         db.session.commit()
 
 
+def get_monitored_chat_ids(phone):
+    """Return the currently monitored Telegram chat IDs for a user."""
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return []
+        return [int(g.chat_id) for g in ManagementGroup.query.filter_by(
+            user_id=user.id, monitored=True
+        ).all()]
+
+
+def get_enabled_bots(phone):
+    """Return all enabled bot usernames configured for a user."""
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return []
+        bots = ManagementBotConfig.query.filter_by(
+            user_id=user.id, enabled=True
+        ).order_by(ManagementBotConfig.created_at.asc()).all()
+        return [b.bot_username for b in bots if b.bot_username]
+
+
 def set_group_monitoring(phone, chat_id, monitored):
     with _management_app.app_context():
         user = ManagementUser.query.filter_by(phone=phone).first()
