@@ -139,7 +139,7 @@
         <h1><i class="fab fa-telegram"></i> Select Channels / Groups</h1>
         <div class="sub">Select the Telegram groups and channels you want to watch. Previously selected groups remain checked.</div>
 
-        <form action="{{ url_for('fetch_groups') }}" method="post">
+        <form><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"> action="{{ url_for('fetch_groups') }}" method="post">
             <div class="groups-list">
                 {% for group in groups_and_channels %}
                     <div class="group-item">
