@@ -7,7 +7,7 @@ from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
 from telethon.sessions import StringSession
 import threading
-from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics, get_telegram_session, save_telegram_session)
+from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics, get_telegram_session, save_telegram_session, get_monitored_chat_ids, get_enabled_bots)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')
@@ -166,85 +166,100 @@ async def fetch_groups_async(client):
 # -----------------------------
 # Trading
 # -----------------------------
-async def trade(client, signal):
-    """Send trade command with safe token fallback."""
+async def trade(client, signal, phone_number):
+    """Forward a parsed signal to every enabled bot configured for this user."""
     try:
         await client.connect()
         if not await client.is_user_authorized():
-            print("Not authorized")
+            print(f"{phone_number}: Telegram client is not authorized")
             return
 
-        await client.send_message(ACHILLES_BOT_USERNAME, "/start")
-        await asyncio.sleep(2)
+        bots = get_enabled_bots(phone_number)
+        if not bots:
+            print(f"{phone_number}: no enabled bot profiles; signal recorded but not forwarded")
+            return
 
         token = signal.get("token", "UNKNOWN")
         ca = signal.get("contract_address")
-
-        # -------------------------
-        # Smart trade message
-        # -------------------------
         if token != "UNKNOWN" and token:
             msg = f"Buy {token} at {ca}"
         else:
-            msg = f"Buy {ca}"  # fallback mode if token unknown
+            msg = f"Buy {ca}"
 
-        await client.send_message(ACHILLES_BOT_USERNAME, msg)
-        print(f"Trade sent: {msg}")
+        for bot_username in bots:
+            try:
+                await client.send_message(bot_username, "/start")
+                await asyncio.sleep(2)
+                await client.send_message(bot_username, msg)
+                print(f"{phone_number}: signal forwarded to @{bot_username}: {msg}")
+            except Exception:
+                app.logger.exception("Failed to forward signal to @%s for %s", bot_username, phone_number)
 
-    except Exception as e:
-        print("Trade error:", e)
+    except Exception:
+        app.logger.exception("Trade/forwarding error for %s", phone_number)
+
 
 # -----------------------------
-# Listener (per user)
+# Dynamic Listener (per user)
 # -----------------------------
-async def listen_for_signals(client, phone_number):
-    """Listen to multiple groups/channels for a specific user."""
-    config_file = os.path.join(SESSION_DIR, f"{phone_number}_config.json")
-    try:
-        with open(config_file, "r") as f:
-            config_data = json.load(f)
-    except FileNotFoundError:
-        print(f"❌ Config file not found for {phone_number}. Please select groups first.")
-        return
-
-    selected_chats = config_data.get("selected_chats", [])
-    sync_user(phone_number)
-    if not selected_chats:
-        print(f"❌ No chats selected for {phone_number}.")
-        return
-
-    sync_groups(phone_number, selected_chats)
-
-    @client.on(events.NewMessage(chats=selected_chats))
-    async def handler(event):
-        message_text = event.message.text
-        signal = extract_token_signal(message_text)
-        if signal:
-            print(f"{phone_number} signal: {signal}")
-            # Management layer records signal metadata only; it does not execute trades.
-            record_signal(phone_number, signal, source_chat_id=str(event.chat_id) if event.chat_id is not None else None,
-                          source_chat_name=getattr(getattr(event, "chat", None), "title", None),
-                          raw_message=message_text)
-            await trade(client, signal)
-
-    print(f"✅ {phone_number} is listening on {len(selected_chats)} chats...")
+async def update_listener_async(phone_number):
+    """Create, replace, or remove the Telegram event handler for the user's monitored groups."""
+    client = get_client(phone_number)
+    await client.connect()
 
     if not await client.is_user_authorized():
-        print(f"❌ {phone_number} not authorized")
+        print(f"{phone_number}: Telegram client is not authorized")
         return
 
-    await client.run_until_disconnected()
+    chat_ids = get_monitored_chat_ids(phone_number)
+    existing = listeners.get(phone_number)
+    if existing:
+        old_handler = existing.get("handler")
+        if old_handler:
+            client.remove_event_handler(old_handler)
+        listeners.pop(phone_number, None)
+
+    if not chat_ids:
+        print(f"{phone_number}: monitoring stopped; no groups selected")
+        return
+
+    async def handler(event):
+        message_text = event.message.text or ""
+        signal = extract_token_signal(message_text)
+        if not signal:
+            return
+
+        print(f"{phone_number}: signal detected from {event.chat_id}: {signal}")
+        record_signal(
+            phone_number,
+            signal,
+            source_chat_id=str(event.chat_id) if event.chat_id is not None else None,
+            source_chat_name=getattr(getattr(event, "chat", None), "title", None),
+            raw_message=message_text,
+        )
+        await trade(client, signal, phone_number)
+
+    client.add_event_handler(handler, events.NewMessage(chats=chat_ids))
+    listeners[phone_number] = {"handler": handler, "chat_ids": chat_ids}
+    print(f"{phone_number}: listening on {len(chat_ids)} monitored chats")
+
 
 def start_listener(phone_number):
-    """Start Telegram listener in a separate thread but use the global loop."""
-    client = get_client(phone_number)
+    """Start or refresh monitoring without blocking the Flask worker."""
+    asyncio.run_coroutine_threadsafe(update_listener_async(phone_number), loop)
 
-    def runner():
-        # This runs on the global loop
-        asyncio.run_coroutine_threadsafe(listen_for_signals(client, phone_number), loop)
 
-    t = threading.Thread(target=runner, daemon=True)
-    t.start()
+def stop_listener(phone_number):
+    """Stop monitoring for a user immediately."""
+    asyncio.run_coroutine_threadsafe(_stop_listener_async(phone_number), loop)
+
+
+async def _stop_listener_async(phone_number):
+    client = clients.get(phone_number)
+    existing = listeners.pop(phone_number, None)
+    if client and existing and existing.get("handler"):
+        client.remove_event_handler(existing["handler"])
+    print(f"{phone_number}: monitoring stopped")
 
 # -----------------------------
 # Routes
@@ -264,6 +279,7 @@ def login():
     if result == "otp_required":
         return redirect(url_for('otp'))
 
+    start_listener(phone)
     return redirect(url_for('dashboard'))
 
 
@@ -340,6 +356,9 @@ def management_groups():
     if not set_group_monitoring(phone, str(cid), monitored):
         return jsonify({'error': 'user not found'}), 404
 
+    # Apply the monitoring change immediately for dashboard/API toggles.
+    start_listener(phone) if monitored else start_listener(phone)
+
     config_file = get_config(phone)
     try:
         with open(config_file, 'r') as f:
@@ -364,6 +383,7 @@ def management_group_delete(chat_id):
         return jsonify({'error': 'not_authenticated'}), 401
     if not remove_group(phone, chat_id):
         return jsonify({'error': 'group not found'}), 404
+    start_listener(phone)
     config_file = get_config(phone)
     try:
         with open(config_file, 'r') as f:
@@ -570,7 +590,10 @@ def fetch_groups():
         with open(config_file, "w") as f:
             json.dump(config_data, f, indent=4)
         sync_groups(phone, selected_ids)
-        flash("Selected groups/channels saved!")
+        # Apply the new watch list immediately. Adding groups starts monitoring;
+        # unchecking groups removes them from the listener immediately.
+        start_listener(phone)
+        flash("Selected groups/channels saved and monitoring updated!")
         return redirect(url_for('dashboard'))
 
     existing = (
