@@ -101,7 +101,6 @@ async function saveBotProfile(){
 }
 async function deleteBot(id){if(!confirm('Delete this bot profile?'))return;try{const r=await fetch('{{ url_for("management_bots_delete",bot_id=0) }}'.replace('/0','/'+id),{method:'DELETE',headers:{'X-CSRF-Token':document.querySelector('meta[name=csrf-token]').content}});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Bot profile deleted')}catch(e){toast(e.message||'Could not delete bot')}}
 async function saveProfile(){const v=document.getElementById('displayName').value.trim();try{const r=await fetch('{{ url_for("management_profile") }}',{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=csrf-token]').content},body:JSON.stringify({display_name:v})});const d=await r.json();if(!r.ok)throw new Error(d.error);state=d;render();toast('Profile saved')}catch(e){toast(e.message||'Could not save profile')}}
-async function startListening(){const b=document.getElementById('listenBtn');b.disabled=true;try{const r=await fetch('{{ url_for("listen") }}',{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.error||d.status);document.getElementById('listenStatus').textContent=d.status||'Listener started';toast('Listener started')}catch(e){toast(e.message||'Could not start listener')}finally{b.disabled=false}}
 render();
 setInterval(refresh,15000);
 </script>
