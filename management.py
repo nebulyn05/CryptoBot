@@ -52,6 +52,14 @@ class ManagementSignal(db.Model):
     captured_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
 
 
+class TelegramSession(db.Model):
+    __tablename__ = "telegram_sessions"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("management_users.id"), nullable=False, unique=True, index=True)
+    session_string = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class ManagementBotConfig(db.Model):
     __tablename__ = "management_bot_configs"
     id = db.Column(db.Integer, primary_key=True)
@@ -91,6 +99,37 @@ def init_management():
                 "INSERT INTO management_schema_meta (id, version) VALUES (1, 1)"
             ))
         db.session.commit()
+
+
+
+def get_telegram_session(phone):
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return None
+        item = TelegramSession.query.filter_by(user_id=user.id).first()
+        return item.session_string if item else None
+
+
+def save_telegram_session(phone, session_string):
+    if not session_string:
+        return False
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            user = ManagementUser(phone=phone)
+            db.session.add(user)
+            db.session.flush()
+        item = TelegramSession.query.filter_by(user_id=user.id).first()
+        if not item:
+            item = TelegramSession(user_id=user.id, session_string=session_string)
+            db.session.add(item)
+        else:
+            item.session_string = session_string
+            item.updated_at = utcnow()
+        user.last_seen = utcnow()
+        db.session.commit()
+        return True
 
 
 def available_bots():
