@@ -5,8 +5,9 @@ import re
 import asyncio
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
+from telethon.sessions import StringSession
 import threading
-from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics)
+from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics, get_telegram_session, save_telegram_session)
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')
@@ -18,8 +19,8 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=os.getenv(
 API_ID = '29469765'
 API_HASH = '9592a56b2eb5ff6eb2e92ee0e6ef9f14'
 
-# SESSION_DIR = 'sessions/' #Temp for vercel to work
-SESSION_DIR = '/tmp/sessions/'
+# Legacy filesystem path for per-user config files. Telegram auth sessions are stored in Postgres.
+SESSION_DIR = os.getenv('SESSION_DIR', '/tmp/sessions')
 os.makedirs(SESSION_DIR, exist_ok=True)
 
 ACHILLES_BOT_USERNAME = 'achilles_trojanbot'
@@ -532,6 +533,7 @@ def fetch_groups():
 
     try:
         groups = run_async(fetch_groups_async(client))
+        persist_telegram_session(phone, client)
     except PermissionError:
         # The Flask session may still exist even when Telethon's Telegram
         # authorization has expired or its session file was lost.
