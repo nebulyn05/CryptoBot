@@ -259,6 +259,20 @@ def get_enabled_bots(phone):
         return [b.bot_username for b in bots if b.bot_username]
 
 
+def get_selected_bot(phone):
+    """Return the user's explicitly selected bot if it is still enabled."""
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user or not user.bot_username:
+            return None
+        bot = ManagementBotConfig.query.filter_by(
+            user_id=user.id,
+            bot_username=user.bot_username,
+            enabled=True,
+        ).first()
+        return bot.bot_username if bot else None
+
+
 def set_group_monitoring(phone, chat_id, monitored):
     with _management_app.app_context():
         user = ManagementUser.query.filter_by(phone=phone).first()
