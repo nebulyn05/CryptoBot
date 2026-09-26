@@ -6,6 +6,7 @@ import asyncio
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
 import threading
+from management import init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -27,6 +28,9 @@ listeners = {}
 # Global event loop
 loop = asyncio.new_event_loop()
 threading.Thread(target=loop.run_forever, daemon=True).start()
+
+# Persistent management database. This records users, monitored groups and captured signals.
+init_management()
 
 
 # -----------------------------
@@ -185,9 +189,12 @@ async def listen_for_signals(client, phone_number):
         return
 
     selected_chats = config_data.get("selected_chats", [])
+    sync_user(phone_number, bot_username=ACHILLES_BOT_USERNAME)
     if not selected_chats:
         print(f"❌ No chats selected for {phone_number}.")
         return
+
+    sync_groups(phone_number, selected_chats)
 
     @client.on(events.NewMessage(chats=selected_chats))
     async def handler(event):
@@ -195,6 +202,10 @@ async def listen_for_signals(client, phone_number):
         signal = extract_token_signal(message_text)
         if signal:
             print(f"{phone_number} signal: {signal}")
+            # Management layer records signal metadata only; it does not execute trades.
+            record_signal(phone_number, signal, source_chat_id=str(event.chat_id) if event.chat_id is not None else None,
+                          source_chat_name=getattr(getattr(event, "chat", None), "title", None),
+                          raw_message=message_text)
             await trade(client, signal)
 
     print(f"✅ {phone_number} is listening on {len(selected_chats)} chats...")
@@ -272,7 +283,18 @@ def password():
 
 @app.route('/dashboard')
 def dashboard():
-    return render_template('dashboard.html')
+    phone = session.get('phone')
+    management = get_management_snapshot(phone) if phone else None
+    return render_template('dashboard.html', management=management)
+
+
+@app.route('/admin/management')
+def management_admin():
+    expected = os.getenv('MANAGEMENT_ADMIN_KEY', '')
+    supplied = request.headers.get('X-Management-Admin-Key', '') or request.args.get('key', '')
+    if not expected or supplied != expected:
+        return jsonify({'error': 'unauthorized'}), 401
+    return jsonify(get_management_overview())
 
 @app.route('/fetch_groups', methods=['GET', 'POST'])
 def fetch_groups():
