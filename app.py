@@ -117,6 +117,7 @@ async def login_telegram(phone):
         session['phone_code_hash'] = sent.phone_code_hash
         return "otp_required"
 
+    persist_telegram_session(phone, client)
     return client
 
 
@@ -126,6 +127,8 @@ async def verify_otp(phone, otp):
 
     try:
         await client.sign_in(phone, otp, phone_code_hash=session.get('phone_code_hash'))
+        persist_telegram_session(phone, client)
+        session.pop('phone_code_hash', None)
         return client
     except SessionPasswordNeededError:
         return "password_required"
@@ -137,6 +140,8 @@ async def verify_password(phone, password):
 
     try:
         await client.sign_in(password=password)
+        persist_telegram_session(phone, client)
+        session.pop('phone_code_hash', None)
         return client
     except PasswordHashInvalidError:
         return "invalid_password"
