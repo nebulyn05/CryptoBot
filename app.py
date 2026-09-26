@@ -6,7 +6,7 @@ import asyncio
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
 import threading
-from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, available_bots)
+from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots)
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -369,10 +369,55 @@ def management_bot():
         return jsonify({'error': 'not_authenticated'}), 401
     payload = request.get_json(silent=True) or {}
     bot_username = (payload.get('bot_username') or '').strip().lstrip('@')
-    if bot_username not in available_bots():
-        return jsonify({'error': 'bot is not in the configured management bot list'}), 400
+    if not bot_username:
+        return jsonify({'error': 'bot username is required'}), 400
     if not set_user_bot(phone, bot_username):
-        return jsonify({'error': 'could not save bot setting'}), 400
+        return jsonify({'error': 'invalid bot username'}), 400
+    return jsonify(get_management_snapshot(phone))
+
+
+@app.route('/api/management/bots', methods=['POST'])
+def management_bots_add():
+    phone = _management_user()
+    if not phone:
+        return jsonify({'error': 'not_authenticated'}), 401
+    payload = request.get_json(silent=True) or {}
+    ok, error = add_user_bot(
+        phone,
+        payload.get('bot_username'),
+        payload.get('label')
+    )
+    if not ok:
+        status = 409 if error == 'bot_already_exists' else 400
+        return jsonify({'error': error}), status
+    return jsonify(get_management_snapshot(phone))
+
+
+@app.route('/api/management/bots/<int:bot_id>', methods=['PATCH'])
+def management_bots_update(bot_id):
+    phone = _management_user()
+    if not phone:
+        return jsonify({'error': 'not_authenticated'}), 401
+    payload = request.get_json(silent=True) or {}
+    ok, error = update_user_bot(
+        phone,
+        bot_id,
+        label=payload.get('label'),
+        enabled=payload.get('enabled') if 'enabled' in payload else None,
+    )
+    if not ok:
+        return jsonify({'error': error}), 400
+    return jsonify(get_management_snapshot(phone))
+
+
+@app.route('/api/management/bots/<int:bot_id>', methods=['DELETE'])
+def management_bots_delete(bot_id):
+    phone = _management_user()
+    if not phone:
+        return jsonify({'error': 'not_authenticated'}), 401
+    ok, error = delete_user_bot(phone, bot_id)
+    if not ok:
+        return jsonify({'error': error}), 404
     return jsonify(get_management_snapshot(phone))
 
 
@@ -436,7 +481,19 @@ def fetch_groups():
         flash("Selected groups/channels saved!")
         return redirect(url_for('dashboard'))
 
-    return render_template('fetch_groups.html', groups_and_channels=groups)
+    existing = (
+        get_management_snapshot(phone) or {}
+    ).get('groups', [])
+    selected_ids = {
+        str(g.get('chat_id'))
+        for g in existing
+        if g.get('monitored')
+    }
+    return render_template(
+        'fetch_groups.html',
+        groups_and_channels=groups,
+        selected_groups=selected_ids,
+    )
 
 
 @app.route('/listen', methods=['POST'])
