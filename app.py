@@ -139,7 +139,7 @@ async def fetch_groups_async(client):
     await client.connect()  # ✅ ADD THIS
 
     if not await client.is_user_authorized():
-        raise Exception("User not authorized")
+        raise PermissionError("Telegram authorization has expired or the session is missing")
 
     result = []
     async for d in client.iter_dialogs():
