@@ -46,9 +46,19 @@ def run_async(coro):
 
 def get_client(phone):
     if phone not in clients:
-        session_path = os.path.join(SESSION_DIR, f"{phone}.session")
-        clients[phone] = TelegramClient(session_path, API_ID, API_HASH, loop=loop)
+        sync_user(phone)
+        session_string = get_telegram_session(phone)
+        telegram_session = StringSession(session_string) if session_string else StringSession()
+        clients[phone] = TelegramClient(telegram_session, API_ID, API_HASH, loop=loop)
     return clients[phone]
+
+
+def persist_telegram_session(phone, client):
+    try:
+        session_string = client.session.save()
+        save_telegram_session(phone, session_string)
+    except Exception:
+        app.logger.exception("Failed to persist Telegram session for %s", phone)
 
 
 def get_config(phone):
