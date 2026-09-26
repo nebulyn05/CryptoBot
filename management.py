@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, text
 
 db = SQLAlchemy()
 _management_app = Flask("cryptobot-management-db")
@@ -25,6 +25,7 @@ class ManagementUser(db.Model):
     last_seen = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
     groups = db.relationship("ManagementGroup", backref="user", cascade="all, delete-orphan")
     signals = db.relationship("ManagementSignal", backref="user", cascade="all, delete-orphan")
+    bots = db.relationship("ManagementBotConfig", backref="user", cascade="all, delete-orphan")
 
 
 class ManagementGroup(db.Model):
@@ -76,6 +77,20 @@ def init_management():
 
     with _management_app.app_context():
         db.create_all()
+        # Lightweight forward-compatible schema version marker. Existing deployments
+        # remain intact; future additive migrations can be keyed from this version.
+        db.session.execute(text(
+            "CREATE TABLE IF NOT EXISTS management_schema_meta "
+            "(id INTEGER PRIMARY KEY, version INTEGER NOT NULL)"
+        ))
+        row = db.session.execute(text(
+            "SELECT version FROM management_schema_meta WHERE id = 1"
+        )).first()
+        if not row:
+            db.session.execute(text(
+                "INSERT INTO management_schema_meta (id, version) VALUES (1, 1)"
+            ))
+        db.session.commit()
 
 
 def available_bots():
@@ -495,4 +510,137 @@ def get_management_overview():
                 }
                 for u in users
             ],
+        }
+
+
+def set_user_active(user_id, active):
+    with _management_app.app_context():
+        user = db.session.get(ManagementUser, int(user_id))
+        if not user:
+            return False
+        user.active = bool(active)
+        user.last_seen = utcnow()
+        db.session.commit()
+        return True
+
+
+def delete_user(user_id):
+    with _management_app.app_context():
+        user = db.session.get(ManagementUser, int(user_id))
+        if not user:
+            return False
+        db.session.delete(user)
+        db.session.commit()
+        return True
+
+
+def admin_set_group_monitoring(group_id, monitored):
+    with _management_app.app_context():
+        group = db.session.get(ManagementGroup, int(group_id))
+        if not group:
+            return False
+        group.monitored = bool(monitored)
+        group.updated_at = utcnow()
+        db.session.commit()
+        return True
+
+
+def admin_delete_group(group_id):
+    with _management_app.app_context():
+        group = db.session.get(ManagementGroup, int(group_id))
+        if not group:
+            return False
+        db.session.delete(group)
+        db.session.commit()
+        return True
+
+
+def admin_update_bot(bot_id, label=None, enabled=None):
+    with _management_app.app_context():
+        config = db.session.get(ManagementBotConfig, int(bot_id))
+        if not config:
+            return False
+        user = db.session.get(ManagementUser, config.user_id)
+        if label is not None:
+            label = str(label).strip()[:160]
+            if not label:
+                return False
+            config.label = label
+        if enabled is not None:
+            config.enabled = bool(enabled)
+            if not config.enabled and user and user.bot_username == config.bot_username:
+                fallback = (ManagementBotConfig.query
+                    .filter(ManagementBotConfig.user_id == user.id,
+                            ManagementBotConfig.id != config.id,
+                            ManagementBotConfig.enabled.is_(True))
+                    .order_by(ManagementBotConfig.created_at.asc()).first())
+                user.bot_username = fallback.bot_username if fallback else "achilles_trojanbot"
+        config.updated_at = utcnow()
+        db.session.commit()
+        return True
+
+
+def admin_delete_bot(bot_id):
+    with _management_app.app_context():
+        config = db.session.get(ManagementBotConfig, int(bot_id))
+        if not config:
+            return False
+        user = db.session.get(ManagementUser, config.user_id)
+        was_selected = user and user.bot_username == config.bot_username
+        db.session.delete(config)
+        if was_selected:
+            fallback = (ManagementBotConfig.query
+                .filter(ManagementBotConfig.user_id == user.id,
+                        ManagementBotConfig.id != config.id,
+                        ManagementBotConfig.enabled.is_(True))
+                .order_by(ManagementBotConfig.created_at.asc()).first())
+            user.bot_username = fallback.bot_username if fallback else "achilles_trojanbot"
+        db.session.commit()
+        return True
+
+
+def set_display_name(phone, display_name):
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return False
+        value = (display_name or "").strip()[:160]
+        user.display_name = value or None
+        user.last_seen = utcnow()
+        db.session.commit()
+        return True
+
+
+def get_signal_page(phone, limit=50, offset=0, token=None):
+    with _management_app.app_context():
+        user = ManagementUser.query.filter_by(phone=phone).first()
+        if not user:
+            return {"items": [], "total": 0, "limit": limit, "offset": offset}
+        limit = max(1, min(int(limit), 100))
+        offset = max(0, int(offset))
+        query = ManagementSignal.query.filter_by(user_id=user.id)
+        if token:
+            query = query.filter(ManagementSignal.token.ilike(f"%{str(token)[:80]}%"))
+        total = query.count()
+        items = query.order_by(ManagementSignal.captured_at.desc()).offset(offset).limit(limit).all()
+        return {"items": _signal_payload(items), "total": total, "limit": limit, "offset": offset}
+
+
+def get_management_analytics(phone=None):
+    with _management_app.app_context():
+        query = ManagementSignal.query
+        if phone:
+            user = ManagementUser.query.filter_by(phone=phone).first()
+            if not user:
+                return {"signals": 0, "unique_tokens": 0, "top_tokens": []}
+            query = query.filter_by(user_id=user.id)
+        total = query.count()
+        unique = query.with_entities(db.func.count(db.func.distinct(ManagementSignal.token))).scalar() or 0
+        rows = query.with_entities(ManagementSignal.token, db.func.count(ManagementSignal.id)).group_by(
+            ManagementSignal.token
+        ).order_by(db.func.count(ManagementSignal.id).desc()).limit(20).all()
+        return {
+            "signals": total,
+            "unique_tokens": unique,
+            "top_tokens": [{"token": token, "count": count} for token, count in rows],
         }

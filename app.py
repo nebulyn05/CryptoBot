@@ -6,10 +6,13 @@ import asyncio
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, PasswordHashInvalidError
 import threading
-from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots)
+from management import (init_management, sync_user, sync_groups, record_signal, get_management_snapshot, get_management_overview, sync_available_groups, set_group_monitoring, remove_group, set_user_bot, add_user_bot, update_user_bot, delete_user_bot, available_bots, set_user_active, delete_user, admin_set_group_monitoring, admin_delete_group, admin_update_bot, admin_delete_bot, set_display_name, get_signal_page, get_management_analytics)
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'
+app.secret_key = os.getenv('SECRET_KEY')
+if not app.secret_key:
+    raise RuntimeError('SECRET_KEY environment variable is required')
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=os.getenv('SESSION_COOKIE_SECURE', 'true').lower() == 'true', SESSION_COOKIE_SAMESITE='Lax')
 
 # Telegram API
 API_ID = '29469765'
@@ -421,6 +424,26 @@ def management_bots_delete(bot_id):
     return jsonify(get_management_snapshot(phone))
 
 
+@app.route('/api/management/profile', methods=['PATCH'])
+def management_profile():
+    phone = _management_user()
+    if not phone: return jsonify({'error': 'not_authenticated'}), 401
+    payload = request.get_json(silent=True) or {}
+    if not set_display_name(phone, payload.get('display_name')): return jsonify({'error': 'user not found'}), 404
+    return jsonify(get_management_snapshot(phone))
+
+@app.route('/api/management/signals')
+def management_signals():
+    phone = _management_user()
+    if not phone: return jsonify({'error': 'not_authenticated'}), 401
+    return jsonify(get_signal_page(phone, request.args.get('limit', 50), request.args.get('offset', 0), request.args.get('token')))
+
+@app.route('/api/management/analytics')
+def management_analytics():
+    phone = _management_user()
+    if not phone: return jsonify({'error': 'not_authenticated'}), 401
+    return jsonify(get_management_analytics(phone))
+
 def _admin_authorized():
     expected = os.getenv('MANAGEMENT_ADMIN_KEY', '')
     if not expected:
@@ -459,6 +482,46 @@ def management_admin():
         return jsonify({'error': 'unauthorized'}), 401
     return jsonify(get_management_overview())
 
+
+@app.route('/admin/api/users/<int:user_id>/status', methods=['POST'])
+def admin_user_status(user_id):
+    if not _admin_authorized(): return jsonify({'error':'unauthorized'}), 401
+    payload=request.get_json(silent=True) or {}
+    if not set_user_active(user_id, payload.get('active', True)): return jsonify({'error':'user_not_found'}),404
+    return jsonify(get_management_overview())
+
+@app.route('/admin/api/users/<int:user_id>', methods=['DELETE'])
+def admin_user_delete(user_id):
+    if not _admin_authorized(): return jsonify({'error':'unauthorized'}), 401
+    if not delete_user(user_id): return jsonify({'error':'user_not_found'}),404
+    return jsonify(get_management_overview())
+
+@app.route('/admin/api/groups/<int:group_id>/status', methods=['POST'])
+def admin_group_status(group_id):
+    if not _admin_authorized(): return jsonify({'error':'unauthorized'}), 401
+    payload=request.get_json(silent=True) or {}
+    if not admin_set_group_monitoring(group_id, payload.get('monitored', True)): return jsonify({'error':'group_not_found'}),404
+    return jsonify(get_management_overview())
+
+@app.route('/admin/api/groups/<int:group_id>', methods=['DELETE'])
+def admin_group_delete(group_id):
+    if not _admin_authorized(): return jsonify({'error':'unauthorized'}), 401
+    if not admin_delete_group(group_id): return jsonify({'error':'group_not_found'}),404
+    return jsonify(get_management_overview())
+
+@app.route('/admin/api/bots/<int:bot_id>', methods=['PATCH'])
+def admin_bot_update(bot_id):
+    if not _admin_authorized(): return jsonify({'error':'unauthorized'}), 401
+    payload=request.get_json(silent=True) or {}
+    if not admin_update_bot(bot_id, payload.get('label') if 'label' in payload else None, payload.get('enabled') if 'enabled' in payload else None):
+        return jsonify({'error':'bot_not_found_or_invalid'}),400
+    return jsonify(get_management_overview())
+
+@app.route('/admin/api/bots/<int:bot_id>', methods=['DELETE'])
+def admin_bot_delete(bot_id):
+    if not _admin_authorized(): return jsonify({'error':'unauthorized'}), 401
+    if not admin_delete_bot(bot_id): return jsonify({'error':'bot_not_found'}),404
+    return jsonify(get_management_overview())
 
 @app.route('/fetch_groups', methods=['GET', 'POST'])
 def fetch_groups():
